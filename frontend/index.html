@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<script>
+  // aplica o tema salvo antes do resto da página carregar, evitando um "flash" da cor errada
+  (function(){
+    const salvo = localStorage.getItem('softdesk-tema');
+    const preferido = salvo || (window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
+    document.documentElement.setAttribute('data-theme', preferido);
+  })();
+</script>
+<title>Softdesk — Relatório mensal</title>
+<link rel="icon" type="image/png" href="https://www.martinelli.adv.br/wp-content/uploads/2024/12/favicon-martinelli.png" />
+<link rel="stylesheet" href="/static/style.css" />
+<script src="/static/vendor/chart.umd.js"></script>
+<style>
+  .marca{ display:flex; align-items:center; gap:14px; min-width:0; }
+  .marca .logo-firma{ height:26px; width:auto; display:block; flex:none; }
+  /* A logo da Martinelli é branca: no tema claro, inverte pra ficar visível no fundo claro. */
+  html[data-theme="light"] .marca .logo-firma{ filter:invert(1); }
+  .marca .divisor{ width:1px; height:24px; background:var(--border); flex:none; }
+  @media (max-width:640px){ .marca .divisor, .marca h1 span{ display:none; } }
+  .tabela-acoes{ display:flex; align-items:center; gap:14px; flex-wrap:wrap; }
+  .tabela-acoes .btn-exp{
+    background:var(--surface); color:var(--text); border:1px solid var(--border);
+    border-radius:6px; padding:6px 12px; font-family:var(--sans); font-size:12.5px; cursor:pointer;
+  }
+  .tabela-acoes .btn-exp:hover{ border-color:var(--accent); }
+  .tabela-acoes .btn-exp:disabled{ opacity:.65; cursor:default; }
+  .status-coleta{ font-family:var(--mono); font-size:12px; white-space:nowrap; }
+  .status-coleta.ok{ color:var(--ok); }
+  .status-coleta.erro{ color:var(--crit); }
+  .tend-head{ display:flex; align-items:baseline; justify-content:space-between; gap:12px; flex-wrap:wrap; margin-bottom:14px; }
+  .tend-legenda{ font-size:11.5px; color:var(--muted); }
+  .tendencia{ display:flex; flex-wrap:wrap; gap:10px; }
+  .tmes{ background:var(--bg); border:1px solid var(--border); border-radius:8px; padding:10px 12px; min-width:96px; }
+  .tmes-mes{ font-size:11.5px; color:var(--muted); display:flex; align-items:center; gap:6px; }
+  .tmes-total{ font-family:var(--mono); font-size:21px; font-weight:600; margin:3px 0; }
+  .tmes .delta{ font-family:var(--mono); font-size:12px; }
+  .tmes .delta.up{ color:var(--warn); }
+  .tmes .delta.down{ color:var(--ok); }
+  .tmes .delta.flat{ color:var(--muted); }
+  .tmes .parcial{ font-size:10px; color:var(--warn); border:1px solid var(--warn); border-radius:4px; padding:0 4px; white-space:nowrap; }
+  /* Resolução e backlog */
+  .sla-grid{ display:grid; grid-template-columns:1.4fr 1fr; gap:22px; align-items:start; }
+  @media (max-width:760px){ .sla-grid{ grid-template-columns:1fr; } }
+  .sla-titulo{ font-size:11.5px; font-weight:600; color:var(--muted); margin:0 0 10px; text-transform:uppercase; letter-spacing:.4px; }
+  .resolucao-wrap{ overflow-x:auto; }
+  table.mini{ border-collapse:collapse; width:100%; font-size:12.5px; }
+  table.mini th, table.mini td{ padding:6px 10px; border-bottom:1px solid var(--border); text-align:left; white-space:nowrap; }
+  table.mini th{ color:var(--muted); font-weight:500; }
+  table.mini td.num, table.mini th.num{ text-align:right; font-family:var(--mono); }
+  .pct{ font-family:var(--mono); font-weight:600; }
+  .pct.ok{ color:var(--ok); } .pct.flat{ color:var(--muted); } .pct.warn{ color:var(--warn); }
+  .bl-tiles{ display:grid; grid-template-columns:repeat(2,1fr); gap:10px; }
+  .bl-tile{ border:1px solid var(--border); border-radius:8px; padding:12px; background:var(--bg); cursor:pointer; transition:border-color .1s; }
+  .bl-tile:hover{ border-color:var(--accent); }
+  .bl-tile.ativo{ border-color:var(--accent); box-shadow:inset 0 0 0 1px var(--accent); }
+  .bl-n{ font-family:var(--mono); font-size:22px; font-weight:600; }
+  .bl-lab{ font-size:11.5px; color:var(--muted); margin-top:2px; }
+  .bl-tile.ok .bl-n{ color:var(--ok); }
+  .bl-tile.flat .bl-n{ color:var(--text); }
+  .bl-tile.warn .bl-n{ color:var(--warn); }
+  .bl-tile.crit .bl-n{ color:var(--crit); }
+  .bl-resumo{ margin-top:10px; font-size:11.5px; color:var(--muted); cursor:pointer; }
+  .bl-resumo:hover{ color:var(--text); }
+  .bl-resumo.ativo{ color:var(--text); }
+  .bl-link{ color:var(--accent); white-space:nowrap; }
+  .tag-auto{ font-size:9.5px; text-transform:uppercase; letter-spacing:.3px; color:var(--warn);
+    border:1px solid var(--warn); border-radius:4px; padding:0 4px; margin-left:6px; white-space:nowrap; cursor:help; }
+  .sla-nota{ margin:16px 0 0; font-size:11px; color:var(--muted); line-height:1.5; }
+  /* Mapa de calor de abertura */
+  .hc-wrap{ overflow-x:auto; padding-bottom:2px; }
+  .hc-tabela{ border-collapse:separate; border-spacing:2px; }
+  .hc-tabela th{ font-weight:500; color:var(--muted); }
+  .hc-hora{ font-size:8.5px; font-family:var(--mono); text-align:center; width:19px; padding-bottom:3px; }
+  .hc-dia{ font-size:10.5px; text-align:right; padding-right:8px; white-space:nowrap; }
+  .hc{ width:19px; height:19px; border-radius:2px; }
+  .hc-rodape{ display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap;
+    margin-top:12px; font-size:11.5px; color:var(--muted); }
+  .hc-legenda{ display:flex; align-items:center; gap:6px; }
+  .hc-ramp{ display:inline-block; width:90px; height:10px; border-radius:3px;
+    background:linear-gradient(90deg, rgba(91,141,239,0.16), rgba(91,141,239,1)); }
+  .mc-select{ background:var(--surface); color:var(--text); border:1px solid var(--border);
+    border-radius:6px; padding:4px 8px; font-family:var(--sans); font-size:12px; cursor:pointer; }
+  .mc-select:hover{ border-color:var(--accent); }
+  button#coletar{ background:var(--surface); color:var(--text); border:1px solid var(--border);
+    border-radius:6px; padding:6px 12px; font-family:var(--sans); font-size:12.5px; cursor:pointer; }
+  button#coletar:hover{ border-color:var(--accent); }
+  button#coletar:disabled{ opacity:.65; cursor:default; }
+  .coleta-msg{ font-family:var(--mono); font-size:11.5px; color:var(--muted); white-space:nowrap;
+    max-width:300px; overflow:hidden; text-overflow:ellipsis; }
+  /* Volume por dia do mês */
+  .dm-wrap{ overflow-x:auto; padding-bottom:2px; }
+  .dm-bars{ display:flex; align-items:flex-end; gap:3px; height:120px; min-width:540px; }
+  .dm-bars > .dm-bar{ flex:1 1 0; min-width:13px; background:#5b8def; border-radius:2px 2px 0 0; }
+  .dm-bars > .dm-bar.zero{ background:rgba(128,128,128,0.12); }
+  .dm-labels{ display:flex; gap:3px; min-width:540px; margin-top:5px; }
+  .dm-labels > .dm-lab{ flex:1 1 0; min-width:13px; text-align:center; font-size:8.5px; font-family:var(--mono); color:var(--muted); }
+  .dm-nota{ font-size:11px; color:var(--muted); }
+  /* Abas */
+  .abas{ display:flex; gap:4px; flex-wrap:wrap; margin:4px 0 18px; border-bottom:1px solid var(--border); }
+  .aba-btn{ background:transparent; color:var(--muted); border:0; border-bottom:2px solid transparent;
+    padding:9px 14px; margin-bottom:-1px; font-family:var(--sans); font-size:13px; cursor:pointer; }
+  .aba-btn:hover{ color:var(--text); }
+  .aba-btn.ativa{ color:var(--accent); border-bottom-color:var(--accent); font-weight:600; }
+  .aba{ display:none; }
+  .aba.ativa{ display:block; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="marca">
+    <img class="logo-firma"
+         src="https://www.martinelli.adv.br/wp-content/uploads/2024/05/2002555-20313-2217-61-2002555-1599220431.png"
+         alt="Martinelli Advogados" />
+    <span class="divisor"></span>
+    <h1>Softdesk <span>— relatório mensal (meus chamados)</span></h1>
+  </div>
+  <div class="fonte">
+    <span class="dot" id="dot"></span>
+    <span id="fonte-texto">carregando…</span>
+    <span id="status-coleta" class="status-coleta" title=""></span>
+    <span id="coleta-msg" class="coleta-msg"></span>
+    <button id="tema-toggle" title="Alternar tema claro/escuro">🌙 escuro</button>
+    <button id="coletar" title="Rodar a coleta do SoftDesk agora (últimos meses)">⟳ coletar agora</button>
+    <button id="refresh" title="Recarregar (use depois de trocar o arquivo em backend/data/)">↻ atualizar</button>
+  </div>
+</header>
+
+<main>
+  <section class="filtros">
+    <div class="filtro-grupo">
+      <label class="rotulo">Abertura</label>
+      <div class="filtro-datas">
+        <input type="date" id="data-de" />
+        <span>até</span>
+        <input type="date" id="data-ate" />
+      </div>
+    </div>
+
+    <div class="filtro-grupo">
+      <label class="rotulo">Status</label>
+      <div class="chips" id="chips-status"></div>
+    </div>
+
+    <div class="filtro-grupo">
+      <label class="rotulo">Categoria</label>
+      <div class="chips" id="chips-categoria"></div>
+    </div>
+
+    <div class="filtro-grupo">
+      <label class="rotulo">Buscar</label>
+      <input id="busca" type="text" placeholder="código, título, solicitante…" />
+    </div>
+
+    <div class="filtro-resultado">
+      <span id="filtro-info"></span>
+      <button id="limpar-filtros">limpar filtros</button>
+    </div>
+  </section>
+
+  <nav class="abas">
+    <button class="aba-btn ativa" data-aba="geral">Visão geral</button>
+    <button class="aba-btn" data-aba="backlog">Backlog &amp; resolução</button>
+    <button class="aba-btn" data-aba="horarios">Horários</button>
+    <button class="aba-btn" data-aba="chamados">Chamados</button>
+  </nav>
+
+  <div class="aba ativa" id="aba-geral">
+  <section class="kpis">
+    <div class="kpi"><div class="value" id="kpi-total">—</div><div class="label">chamados filtrados</div></div>
+    <div class="kpi"><div class="value" id="kpi-tempo">—</div><div class="label">prazo médio até término previsto (dias)</div></div>
+    <div class="kpi"><div class="value" id="kpi-categoria" style="font-size:16px">—</div><div class="label">categoria mais frequente</div></div>
+    <div class="kpi"><div class="value" id="kpi-atendente" style="font-size:16px">—</div><div class="label">solicitante mais acionado</div></div>
+  </section>
+
+  <section class="charts-row">
+    <div class="panel">
+      <h2>Chamados por mês</h2>
+      <div class="chart-box"><canvas id="chart-mes"></canvas></div>
+    </div>
+    <div class="panel">
+      <h2>Por categoria</h2>
+      <div class="chart-box"><canvas id="chart-categoria"></canvas></div>
+    </div>
+    <div class="panel">
+      <h2>Top 10 solicitantes</h2>
+      <div class="chart-box"><canvas id="chart-atendente"></canvas></div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="tend-head">
+      <h2 style="margin:0">Tendência mês a mês</h2>
+      <span class="tend-legenda">chamados abertos por mês · ▲ mais / ▼ menos que o mês anterior (% vs. anterior)</span>
+    </div>
+    <div id="tendencia-corpo" class="tendencia"></div>
+  </section>
+  </div><!-- /aba-geral -->
+
+  <div class="aba" id="aba-backlog">
+  <section class="panel">
+    <div class="tend-head">
+      <h2 style="margin:0">Resolução e backlog</h2>
+      <span class="tend-legenda">aproximado · a partir do status e da data de abertura (sem tempo exato de SLA)</span>
+    </div>
+    <div class="sla-grid">
+      <div class="sla-bloco">
+        <h3 class="sla-titulo">Resolução por mês</h3>
+        <div id="resolucao-corpo" class="resolucao-wrap"></div>
+      </div>
+      <div class="sla-bloco">
+        <h3 class="sla-titulo">Backlog em aberto (aging)</h3>
+        <div id="backlog-corpo"></div>
+      </div>
+    </div>
+    <p class="sla-nota">
+      Concluído = status Fechado, Encerrado, Resolvido, Cancelado ou Reprovado. Os meses
+      antigos refletem o status registrado na última coleta daquele mês — chamados fechados
+      depois disso podem ainda aparecer como abertos. O aging usa a data de hoje.
+    </p>
+  </section>
+  </div><!-- /aba-backlog -->
+
+  <div class="aba" id="aba-horarios">
+  <section class="panel">
+    <div class="tend-head" style="margin-bottom:4px">
+      <h2 style="margin:0">Mapa de calor — abertura</h2>
+      <select id="mc-mes" class="mc-select" title="Filtrar o mapa por mês">
+        <option value="">Todos os meses</option>
+      </select>
+    </div>
+    <div class="tend-legenda" style="margin-bottom:14px">quando os chamados são abertos · dia da semana × hora · mais azul = mais chamados</div>
+    <div id="mapacalor-corpo"></div>
+  </section>
+
+  <section class="panel">
+    <div class="tend-head" style="margin-bottom:4px">
+      <h2 style="margin:0">Volume por dia do mês</h2>
+      <select id="dm-mes" class="mc-select" title="Escolher o mês (ou somar todos)">
+        <option value="">Todos os meses</option>
+      </select>
+    </div>
+    <div class="tend-legenda" style="margin-bottom:14px">quantos chamados abrem em cada dia do mês (1–31) · ajuda a ver início/meio/fim de mês</div>
+    <div id="diames-corpo"></div>
+  </section>
+  </div><!-- /aba-horarios -->
+
+  <div class="aba" id="aba-chamados">
+  <section class="panel">
+    <div class="tabela-header">
+      <h2 style="margin:0">Chamados</h2>
+      <div class="tabela-acoes">
+        <button id="exportar" class="btn-exp" title="Baixar os chamados filtrados em CSV (abre no Excel)">⤓ CSV</button>
+        <button id="exportar-xlsx" class="btn-exp" title="Excel completo: resumo (KPIs) + quebras por categoria, status, mês e solicitante + detalhe. Respeita os filtros.">⤓ Excel</button>
+        <button id="exportar-pdf" class="btn-exp" title="Relatório em PDF pra apresentar: resumo e quebras. Respeita os filtros.">⤓ PDF</button>
+        <div class="paginacao">
+          <button id="pg-prev">‹ anterior</button>
+          <span id="pg-info">— / —</span>
+          <button id="pg-next">próxima ›</button>
+        </div>
+      </div>
+    </div>
+    <table>
+      <thead>
+        <tr>
+          <th>Código</th><th>Título</th><th>Categoria</th><th>Solicitante</th>
+          <th>Status</th><th>Abertura</th><th>Término previsto</th>
+        </tr>
+      </thead>
+      <tbody id="tabela-chamados">
+        <tr><td colspan="7" class="empty">carregando…</td></tr>
+      </tbody>
+    </table>
+  </section>
+  </div><!-- /aba-chamados -->
+</main>
+
+<script src="/static/app.js?v=14"></script>
+</body>
+</html>
